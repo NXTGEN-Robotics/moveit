@@ -42,6 +42,7 @@
 #include <moveit_msgs/RobotTrajectory.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/String.h>
+#include <std_msgs/Int16.h>
 #include <ros/ros.h>
 #include <moveit/controller_manager/controller_manager.h>
 #include <boost/thread.hpp>
@@ -308,6 +309,10 @@ private:
   ros::NodeHandle node_handle_;
   ros::NodeHandle root_node_handle_;
   ros::Subscriber event_topic_subscriber_;
+
+  ros::Publisher trajectory_execution_status_publisher_;
+  ros::Timer trajectory_execution_status_timer_;
+  void trajectoryExecutionStatusTimerCB(const ros::TimerEvent&);
 
   std::map<std::string, ControllerInformation> known_controllers_;
   bool manage_controllers_;

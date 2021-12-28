@@ -174,6 +174,16 @@ void TrajectoryExecutionManager::initialize()
   event_topic_subscriber_ =
       root_node_handle_.subscribe(EXECUTION_EVENT_TOPIC, 100, &TrajectoryExecutionManager::receiveEvent, this);
 
+  trajectory_execution_status_publisher_ =
+      root_node_handle_.advertise<std_msgs::Int16>("trajectory_execution_manager/status", 10);
+  trajectory_execution_status_timer_ = 
+      root_node_handle_.createTimer(
+            ros::Duration(0.1),
+            &TrajectoryExecutionManager::trajectoryExecutionStatusTimerCB,
+            this,
+            false,
+            true);
+
   reconfigure_impl_ = new DynamicReconfigureImpl(this);
 
   if (manage_controllers_)
@@ -1773,5 +1783,14 @@ void TrajectoryExecutionManager::loadControllerParams()
       }
     }
   }
+}
+
+void TrajectoryExecutionManager::trajectoryExecutionStatusTimerCB(const ros::TimerEvent &e)
+{
+  std_msgs::Int16 statusMsg;
+  execution_state_mutex_.lock();
+  statusMsg.data = execution_complete_ ? 1 : 0;
+  execution_state_mutex_.unlock();
+  trajectory_execution_status_publisher_.publish(statusMsg);
 }
 }  // namespace trajectory_execution_manager
