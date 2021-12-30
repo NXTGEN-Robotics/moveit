@@ -58,6 +58,7 @@ PointCloudOctomapUpdater::PointCloudOctomapUpdater()
   , max_update_rate_(0)
   , point_cloud_subscriber_(nullptr)
   , point_cloud_filter_(nullptr)
+  , publish_occupied_cells_cloud_(false)
 {
 }
 
@@ -84,6 +85,8 @@ bool PointCloudOctomapUpdater::setParams(XmlRpc::XmlRpcValue& params)
       filtered_cloud_topic_ = static_cast<const std::string&>(params["filtered_cloud_topic"]);
     if (params.hasMember("ns"))
       ns_ = static_cast<const std::string&>(params["ns"]);
+    if (params.hasMember("publish_occupied_cells_cloud"))
+      publish_occupied_cells_cloud_ = static_cast<const bool&>(params["publish_occupied_cells_cloud"]);
   }
   catch (XmlRpc::XmlRpcException& ex)
   {
@@ -108,6 +111,13 @@ bool PointCloudOctomapUpdater::initialize()
   if (!filtered_cloud_topic_.empty())
     filtered_cloud_publisher_ =
         private_nh_.advertise<sensor_msgs::PointCloud2>(prefix + filtered_cloud_topic_, 10, false);
+  
+  if (publish_occupied_cells_cloud_)
+  {
+    occupied_cells_cloud_publisher_ =
+        private_nh_.advertise<sensor_msgs::PointCloud2>(prefix + "occupied_cells_centers", 10, false);
+  }
+  
   return true;
 }
 
@@ -232,6 +242,7 @@ void PointCloudOctomapUpdater::cloudMsgCallback(const sensor_msgs::PointCloud2::
 
   octomap::KeySet free_cells, occupied_cells, model_cells, clip_cells;
   std::unique_ptr<sensor_msgs::PointCloud2> filtered_cloud;
+  std::unique_ptr<sensor_msgs::PointCloud2> occupied_cells_cloud;
 
   // We only use these iterators if we are creating a filtered_cloud for
   // publishing. We cannot default construct these, so we use unique_ptr's
@@ -239,6 +250,12 @@ void PointCloudOctomapUpdater::cloudMsgCallback(const sensor_msgs::PointCloud2::
   std::unique_ptr<sensor_msgs::PointCloud2Iterator<float>> iter_filtered_x;
   std::unique_ptr<sensor_msgs::PointCloud2Iterator<float>> iter_filtered_y;
   std::unique_ptr<sensor_msgs::PointCloud2Iterator<float>> iter_filtered_z;
+
+  if (publish_occupied_cells_cloud_)
+  {
+    occupied_cells_cloud = std::make_unique<sensor_msgs::PointCloud2>();
+  }
+  
 
   if (!filtered_cloud_topic_.empty())
   {
@@ -372,6 +389,41 @@ void PointCloudOctomapUpdater::cloudMsgCallback(const sensor_msgs::PointCloud2::
     sensor_msgs::PointCloud2Modifier pcd_modifier(*filtered_cloud);
     pcd_modifier.resize(filtered_cloud_size);
     filtered_cloud_publisher_.publish(*filtered_cloud);
+  }
+
+  if (publish_occupied_cells_cloud_)
+  {
+    pcl::PointCloud<PCLPoint> pcl_occupied_cloud;
+    // lock tree
+    tree_->lockRead();
+    // now, traverse all leafs in the tree:
+    for (OcTreeT::iterator it = tree_->begin(),
+      end = tree_->end(); it != end; ++it)
+    {
+      if (tree_->isNodeOccupied(*it))
+      {
+        double x = it.getX();
+        double y = it.getY();
+        double z = it.getZ();
+        pcl_occupied_cloud.points.push_back(PCLPoint(x, y, z));
+      }
+    }
+    // for (const octomap::OcTreeKey& occupied_cell : occupied_cells)
+    // {
+    //   auto pt = tree_->keyToCoord(occupied_cell);
+    //   double x = pt.x();
+    //   double y = pt.y();
+    //   double z = pt.z();
+    //   pcl_occupied_cloud.points.push_back(PCLPoint(x, y, z));
+    // }
+    // unlock tree
+    tree_->unlockRead();
+
+    pcl::toROSMsg (pcl_occupied_cloud, *occupied_cells_cloud);
+    occupied_cells_cloud->header = cloud_msg->header;
+    occupied_cells_cloud->header.frame_id = monitor_->getMapFrame();
+
+    occupied_cells_cloud_publisher_.publish(*occupied_cells_cloud);
   }
 }
 }  // namespace occupancy_map_monitor

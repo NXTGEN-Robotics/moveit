@@ -41,6 +41,8 @@ find_package(catkin REQUIRED COMPONENTS
   moveit_ros_occupancy_map_monitor
   moveit_ros_planning
   nodelet
+  pcl_ros
+  pcl_conversions
 )
 moveit_build_options()
 

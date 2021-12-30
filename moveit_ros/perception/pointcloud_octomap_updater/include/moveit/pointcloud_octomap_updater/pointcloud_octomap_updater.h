@@ -44,7 +44,14 @@
 #include <moveit/occupancy_map_monitor/occupancy_map_updater.h>
 #include <moveit/point_containment_filter/shape_mask.h>
 
+#include <pcl/point_types.h>
+#include <pcl/conversions.h>
+#include <pcl_conversions/pcl_conversions.h>
+
 #include <memory>
+
+typedef pcl::PointXYZ PCLPoint;
+typedef octomap::OcTree OcTreeT;
 
 namespace occupancy_map_monitor
 {
@@ -89,6 +96,8 @@ private:
   std::string filtered_cloud_topic_;
   std::string ns_;
   ros::Publisher filtered_cloud_publisher_;
+  ros::Publisher occupied_cells_cloud_publisher_;
+  bool publish_occupied_cells_cloud_;
 
   message_filters::Subscriber<sensor_msgs::PointCloud2>* point_cloud_subscriber_;
   tf2_ros::MessageFilter<sensor_msgs::PointCloud2>* point_cloud_filter_;
