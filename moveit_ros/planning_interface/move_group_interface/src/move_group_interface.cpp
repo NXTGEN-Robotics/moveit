@@ -39,6 +39,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <memory>
+#include <thread>
 #include <moveit/warehouse/constraints_storage.h>
 #include <moveit/kinematic_constraints/utils.h>
 #include <moveit/move_group/capability_names.h>
@@ -61,6 +62,7 @@
 #include <moveit_msgs/SetPlannerParams.h>
 
 #include <std_msgs/String.h>
+#include <std_msgs/Int16.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <tf2/utils.h>
 #include <tf2_eigen/tf2_eigen.h>
@@ -144,6 +146,9 @@ public:
         trajectory_execution_manager::TrajectoryExecutionManager::EXECUTION_EVENT_TOPIC, 1, false);
     attached_object_publisher_ = node_handle_.advertise<moveit_msgs::AttachedCollisionObject>(
         planning_scene_monitor::PlanningSceneMonitor::DEFAULT_ATTACHED_COLLISION_OBJECT_TOPIC, 1, false);
+
+    trajectory_async_execution_result_publisher_ = node_handle_.advertise<std_msgs::Int16>(
+        "/trajectory_async_exec_result", 1, false);
 
     current_state_monitor_ = getSharedStateMonitor(robot_model_, tf_buffer_, node_handle_);
 
@@ -243,6 +248,9 @@ public:
   {
     if (constraints_init_thread_)
       constraints_init_thread_->join();
+    
+    if (async_execute_thread_)
+      async_execute_thread_->join();
   }
 
   const std::shared_ptr<tf2_ros::Buffer>& getTF() const
@@ -876,6 +884,34 @@ public:
     }
   }
 
+  void asyncExecuteResultThread()
+  {
+    std_msgs::Int16 msg;
+    if (!execute_action_client_->waitForResult())
+    {
+      msg.data = 1;
+      trajectory_async_execution_result_publisher_.publish(msg);
+      ROS_INFO_STREAM_NAMED(LOGNAME, "ExecuteTrajectory action returned early");
+      return;
+    }
+
+    if (execute_action_client_->getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+    {
+      msg.data = 0;
+      //return MoveItErrorCode(execute_action_client_->getResult()->error_code);
+    }
+    else
+    {
+      msg.data = 2;
+      ROS_INFO_STREAM_NAMED(LOGNAME, execute_action_client_->getState().toString()
+                                         << ": " << execute_action_client_->getState().getText());
+      //return MoveItErrorCode(execute_action_client_->getResult()->error_code);
+    }
+
+    trajectory_async_execution_result_publisher_.publish(msg);
+
+  }
+
   MoveItErrorCode execute(const moveit_msgs::RobotTrajectory& trajectory, bool wait)
   {
     if (!execute_action_client_)
@@ -895,6 +931,13 @@ public:
     execute_action_client_->sendGoal(goal);
     if (!wait)
     {
+      // start a separate thread to report result when finished
+      if (async_execute_thread_)
+      {
+        async_execute_thread_->detach();
+      }
+      async_execute_thread_ = std::make_unique<std::thread>(&MoveGroupInterfaceImpl::asyncExecuteResultThread, this);
+      //
       return MoveItErrorCode(moveit_msgs::MoveItErrorCodes::SUCCESS);
     }
 
@@ -1329,6 +1372,7 @@ private:
   // ROS communication
   ros::Publisher trajectory_event_publisher_;
   ros::Publisher attached_object_publisher_;
+  ros::Publisher trajectory_async_execution_result_publisher_;
   ros::ServiceClient query_service_;
   ros::ServiceClient get_params_service_;
   ros::ServiceClient set_params_service_;
@@ -1337,6 +1381,9 @@ private:
   std::unique_ptr<moveit_warehouse::ConstraintsStorage> constraints_storage_;
   std::unique_ptr<boost::thread> constraints_init_thread_;
   bool initializing_constraints_;
+
+  // separate thread to monitor execution when using async calls
+  std::unique_ptr<std::thread> async_execute_thread_;
 };
 
 MoveGroupInterface::MoveGroupInterface(const std::string& group_name, const std::shared_ptr<tf2_ros::Buffer>& tf_buffer,
